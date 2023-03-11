@@ -2,13 +2,23 @@
 // Behringer X32 stompbox for assigns and mute groups
 // ***************************************************************
 // 2023-03-04 initial draft
+// Supports:
+// - mutes        /ch/01/mix/on,i
+// - mute groups  /config/mute/1,i
+// - faders       /ch/02/mix/09/level,f
+// - snippets     /load,snippet i
+// Features:
+// - one-way (just send) - in case we don't want to hog the bandwidth
+// - two-way (receive confirmation and update LED)
+// - monitor battery voltage
+// - [ ] TODO send equivalent MIDI SysEx 
 // ***************************************************************
-// [ ] OSC Loop
 // [ ] hash the WIFI Password
 // [ ] hostname to work? esp32-086628 seems to be the default
 // [ ] battery monitor
-// [ ] rewrite without String class?
-
+// [ ] rewrite without String class (midi message)
+// [ ] visual acknowledgement
+// [ ] compare xRemote and Subscribe
 // ***************************************************************
 
 // button library https://github.com/madleech/Button
@@ -64,6 +74,7 @@ public:
   char *oscPayload_s;  // OSC payload - relevent only for snippets
   int oscState;      // OSC state (for toggle values like Mute)
   int oscPayload_i;      // for loading snippets
+  float oscPayload_f; // for fader values
 
   OSCWidget(char *theFriendlyName,
             int theButtonPin,
@@ -72,7 +83,8 @@ public:
             int theLedResponse,
             char *theOscAddress,
             char *theOscPayload_s,
-            int theOscIndex = -1)
+            int theOscIndex = -1,
+            float theOscPayload_f = -1)
       : button(theButtonPin),
         friendlyDebugName(theFriendlyName),
         buttonPin(theButtonPin),
@@ -81,6 +93,7 @@ public:
         isReverseLed(theLedResponse),
         oscAddress(theOscAddress),
         oscPayload_s(theOscPayload_s),// use "" if not used
+        oscPayload_f(theOscPayload_f),// use -1 if not used
         oscPayload_i(theOscIndex),    // use -1 if not used
         oscState(0)
   {
@@ -109,8 +122,10 @@ public:
     Serial.print(oscAddress);
     Serial.print(", ");
     Serial.print(oscPayload_s);
-    Serial.print(", ");
+    Serial.print(", i ");
     Serial.print(oscPayload_i);
+    Serial.print(", f ");
+    Serial.print(oscPayload_f);    
     Serial.print(" (");
     Serial.print(oscState);
     Serial.println(")");
@@ -143,10 +158,10 @@ const unsigned int localPort = 8888; // local port to listen for OSC packets (al
 // ***************************************************************
 OSCWidget myWidgets[] = {
     // friendly_name, button_pin, led_pin, isOscToggle, isReverseLed, oscAddress, oscPayload_s, [oscPayload_i]
-    OSCWidget("Button A", 13, 22, true, false, "/ch/01/mix/on", ""),
-    OSCWidget("Button B", 2, 0, false, false, "/load", "snippet", 99),
-    OSCWidget("Button C", 12, 14, true, false, "/config/mute/1", ""),
-    OSCWidget("Button D", 27, 26, false, false, "/ch/02/mix/09/level", "127", -1)};
+    OSCWidget("Button A", 13, 22, true, false,  "/ch/01/mix/on",        ""),
+    OSCWidget("Button B", 2, 0,   false, false, "/load",                "snippet", 99),
+    OSCWidget("Button C", 12, 14, true, false,  "/config/mute/1",       ""),
+    OSCWidget("Button D", 27, 26, false, false, "/ch/02/mix/09/level",  "", -1 , 0.75)};
 
 #define MIDI_UART 2
 #define PIN_FOR_BATTERY_STATUS_LED 4
@@ -334,6 +349,7 @@ void taskButtonsLoop(void *parameters)
       do_xRemote = (modeButton.read() == Button::RELEASED);
       if (do_xRemote) {
         do_Refresh = true;
+        vTaskResume(xUDPLoopHandle);
       }
       printMillis();
       Serial.print("do_xRemote: ");
@@ -354,14 +370,25 @@ void taskButtonsLoop(void *parameters)
         }
         else
         {
-          if (*theWidget.oscPayload_s) {
-            msg.add(theWidget.oscPayload_s); // send the payload string if defined
-          };
-          if (theWidget.oscPayload_i >= 0)
+          if (theWidget.oscPayload_f >= 0)
           {
-            msg.add(theWidget.oscPayload_i); // send the payload int (index) if defined
+            // assume fader-type OSC
+            msg.add(theWidget.oscPayload_f);
+            // [ ] TODO convert float to string to compose text for MIDI SysEx
+            theWidget.oscPayload_s = "z_float";
           }
-          // [ ] TODO convert int to string to compose text for MIDI SysEx - for fader-style commands only;  how about
+          else
+          {
+            // assume snippet-type OSC
+            if (*theWidget.oscPayload_s)
+            {
+              msg.add(theWidget.oscPayload_s); // send the payload string if defined
+            };
+            if (theWidget.oscPayload_i >= 0)
+            {
+              msg.add(theWidget.oscPayload_i); // send the payload int (index) if defined
+            }
+          }
         };
 
         // send OSC message
@@ -370,9 +397,10 @@ void taskButtonsLoop(void *parameters)
         Udp.endPacket();
         msg.empty();
 
-        // send OSC again for toggles (mutes) so we get an update, as X32 does not seem to echo this
-        if (theWidget.isOscToggle)
+        // X32 does not seem to echo back the Fader and Mute commands
+        if (do_xRemote && (theWidget.isOscToggle || theWidget.oscPayload_f >= 0))
         {
+          // send OSC again for toggles (mutes) so we get an update
           OSCMessage msg2(theWidget.oscAddress);
           msg2.setAddress(theWidget.oscAddress);
           Udp.beginPacket(X32Address, X32Port);
@@ -411,90 +439,104 @@ void taskUDPLoop(void *parameters)
 
   for (;;)
   {
-    OSCMessage msg;
-    size = (WiFi.status() == WL_CONNECTED) ? Udp.parsePacket() : -1111;
+    if (do_xRemote && WiFi.status() == WL_CONNECTED) {
+      OSCMessage msg;
+      size = Udp.parsePacket();
 
-    if (size == -1111)
-    {
-      Serial.println("skip parsePacket as WiFi not connected");
-    };
-
-    if (millis() - m > 500)
-    {
-      m = millis();
-      odd = !odd;
-      Serial.print((odd) ? "*\b" : ".\b"); // display heartbeat
-    }
-
-    if (size > 0)
-    {
-      Serial.print("[");
-      Serial.print(millis());
-      Serial.print("] ");
-      Serial.print(size);
-      Serial.print(" bytes received: ");
-
-      while (size--)
+      if (millis() - m > 500)
       {
-        n = Udp.read();
-        msg.fill(n);
-        if (n < 16)
+        m = millis();
+        odd = !odd;
+        Serial.print((odd) ? "*\b" : ".\b"); // display heartbeat
+      }
+
+      if (size > 0)
+      {
+        Serial.print("[");
+        Serial.print(millis());
+        Serial.print("] ");
+        Serial.print(size);
+        Serial.print(" bytes received: ");
+
+        while (size--)
         {
-          Serial.print(" ");
-          Serial.print(n, HEX);
+          n = Udp.read();
+          msg.fill(n);
+          if (n < 16)
+          {
+            Serial.print(" ");
+            Serial.print(n, HEX);
+          }
+          else
+          {
+            Serial.print((char)n);
+          };
+        }
+
+        Serial.print(" --> ");
+        matched = 0;
+
+        if (!msg.hasError())
+        {
+          // do we recognise this OSC messsage?
+          for (auto &theWidget : myWidgets)
+          {
+            if (msg.fullMatch(theWidget.oscAddress))
+            {
+              // yes we do, so let's take some action
+              matched++;
+              Serial.print("MATCHES ");
+              Serial.print(theWidget.friendlyDebugName);
+
+              if (msg.isInt(0) && theWidget.isOscToggle)
+              {
+                // for binary states 0 or 1
+                theWidget.oscState = msg.getInt(0);
+                theWidget.doDigitalWrite((theWidget.oscState > 0) ? LED_PIN_OFF : LED_PIN_ON);
+              }
+              else if (msg.isFloat(0))
+              {
+                // for fader-style
+                Serial.print(" FLOAT: ");
+                Serial.print(msg.getFloat(0));
+                // [ ] TODO - visual acknowledgement e.g. flash led briefly
+              }
+              else if (msg.isString(0))
+              {
+                msg.getString(0, str, 64);
+
+                Serial.print(" STRING: '");
+                Serial.print(str);
+                if (msg.isInt(1))
+                {
+                  Serial.print("' INDEX: ");
+                  Serial.print(msg.getInt(1));
+                }
+                // [ ] TODO - visual acknowledgement e.g. flash led briefly
+              };
+              Serial.println();
+            };
+          };
+          if (matched == 0)
+          {
+            Serial.println("NO MATCH");
+          }
         }
         else
         {
-          Serial.print((char)n);
+          Serial.print("ERROR: ");
+          Serial.println(msg.getError());
+          // typedef enum { OSC_OK = 0, BUFFER_FULL, INVALID_OSC, ALLOCFAILED, INDEX_OUT_OF_BOUNDS } OSCErrorCode;
         };
-      }
-
-      Serial.print(" --> ");
-      matched = 0;
-
-      if (!msg.hasError())
-      {
-        // do we recognise this OSC messsage?
-        for (auto &theWidget : myWidgets)
-        {
-          if (msg.fullMatch(theWidget.oscAddress))
-          {
-            // yes we do, so let's take some action
-            matched++;
-            Serial.print("MATCHES ");
-            Serial.print(theWidget.oscAddress);
-
-            if (msg.isInt(0))
-            {
-              theWidget.oscState = msg.getInt(0);
-              theWidget.doDigitalWrite((theWidget.oscState > 0) ? LED_PIN_OFF : LED_PIN_ON);
-            }
-            else if (msg.isString(0))
-            {
-              msg.getString(0, str, 64);
-
-              Serial.print("STRING: ");
-              Serial.print(str);
-
-              // [ ] TODO MORE STUFF
-              // get integer value
-              // flash led for 1 second
-            };
-            Serial.println();
-          };
-        };
-        if (matched == 0)
-        {
-          Serial.println("NO MATCH");
-        }
-      }
-      else
-      {
-        Serial.print("ERROR: ");
-        Serial.println(msg.getError());
-        // typedef enum { OSC_OK = 0, BUFFER_FULL, INVALID_OSC, ALLOCFAILED, INDEX_OUT_OF_BOUNDS } OSCErrorCode;
       };
-    };
+    } else
+    {
+      // else if no wifi, or not monitoring X32 then suspend myself
+      printMillis();
+      Serial.println("taskUDPLoop suspending itself.");
+      // depends on WiFiGotIP or taskButtonsLoop to Resume
+      vTaskSuspend(xUDPLoopHandle);
+    }
     vTaskDelay(10 / portTICK_PERIOD_MS); // looks like small delay is needed...
   };
 };
