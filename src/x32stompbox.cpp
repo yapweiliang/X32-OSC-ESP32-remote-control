@@ -21,6 +21,8 @@
 // [ ] compare xRemote and Subscribe
 // ***************************************************************
 
+// #include <Arduino.h> // this is already called by Button.h, etc
+
 // button library https://github.com/madleech/Button
 #include <Button.h>
 
@@ -68,12 +70,12 @@ public:
   uint8_t ledPin;          // corresponding GPIO pin
   Button button;
 
-  bool isOscToggle;  // is this a toggle (like Mute) or snippet
-  bool isReverseLed; // LED state opposite to boolean state
-  char *oscAddress;  // OSC address
-  char *oscPayload_s;  // OSC payload - relevent only for snippets
-  int oscState;      // OSC state (for toggle values like Mute)
-  int oscPayload_i;      // for loading snippets
+  bool isOscToggle;   // is this a toggle (like Mute) or snippet
+  bool isReverseLed;  // LED state opposite to boolean state
+  char *oscAddress;   // OSC address
+  char *oscPayload_s; // OSC payload - relevent only for snippets
+  int oscState;       // OSC state (for toggle values like Mute)
+  int oscPayload_i;   // for loading snippets
   float oscPayload_f; // for fader values
 
   OSCWidget(char *theFriendlyName,
@@ -158,17 +160,17 @@ const unsigned int localPort = 8888; // local port to listen for OSC packets (al
 // ***************************************************************
 OSCWidget myWidgets[] = {
     // friendly_name, button_pin, led_pin, isOscToggle, isReverseLed, oscAddress, oscPayload_s, [oscPayload_i]
-    OSCWidget("Button A", 13, 22, true, false,  "/ch/01/mix/on",        ""),
-    OSCWidget("Button B", 2, 0,   false, false, "/load",                "snippet", 99),
-    OSCWidget("Button C", 12, 14, true, false,  "/config/mute/1",       ""),
-    OSCWidget("Button D", 27, 26, false, false, "/ch/02/mix/09/level",  "", -1 , 0.75)};
-
+    OSCWidget("Button A", 32, 19, true,  false, "/ch/01/mix/on",        ""),
+    OSCWidget("Button B", 33, 23, false, false, "/load",                "snippet", 99),
+    OSCWidget("Button C", 25, 18, true,  true,  "/config/mute/1",       ""),
+    OSCWidget("Button D", 26,  5, false, false, "/ch/02/mix/09/level",  "", -1 , 0.75)};
+// GPIO INPUTS 34,35,36,39 do not have internal pull-up/pull-down
 #define MIDI_UART 2
 #define PIN_FOR_BATTERY_STATUS_LED 4
-#define PIN_FOR_WIFI_STATUS_LED 15 // internal LED is 22 for my LOLIN32
-#define PIN_FOR_BATTERY_VOLTAGE 32
-#define BATTERY_VOLTAGE_LOW_CUTOFF 3.0 // volts at pin [ ] TODO convert to 0-4095
-#define PIN_FOR_MODE_SWITCH 33 
+#define PIN_FOR_WIFI_STATUS_LED 22      // internal LED is 22 for my LOLIN32
+#define PIN_FOR_BATTERY_VOLTAGE 36      // cannot use ADC2 pins (needed for WiFi)
+#define BATTERY_VOLTAGE_LOW_CUTOFF 3000 // 0 - 4095; value depends on voltage divider circuit
+#define PIN_FOR_MODE_SWITCH 14
 
 #if true
 // LED lights up if pin pulls voltage down
@@ -287,7 +289,7 @@ void WiFiGotIP(WiFiEvent_t event, WiFiEventInfo_t info)
 
   Udp.begin(localPort);
   vTaskResume(xUDPLoopHandle);
-  vTaskResume(xPokeOSCLoopHandle); // just once here, we won't need to suspend on wifi lost
+  vTaskResume(xPokeOSCLoopHandle);
 }
 
 void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info)
@@ -327,11 +329,28 @@ const char *wl_status_to_string(wl_status_t status)
 }
 
 // ***************************************************************
-// void taskFlashLedOnce
+// void taskLedFlash
+// - multiple instances of this task can be started
+//
+// call with:-
+// xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)22, 1, NULL);
+// xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)theWidget.ledPin, 1, NULL);
 // ***************************************************************
-void taskFlashLedOnce(void *parameters)
+void taskLedFlash(void *parameters)
 {
-  // [ ] TODO -
+  uint8_t ledPin = (uint32_t)parameters;
+  // if want to read state it may need different mode GPIO_MODE_INPUT_OUTPUT / GPIO_MODE_INPUT_PUTPUT_OD
+
+#ifdef VERBOSE_DEBUG
+  printMillis();
+  Serial.print("Flashing pin: ");
+  Serial.println(ledPin);
+#endif
+  digitalWrite(ledPin, LED_PIN_ON);
+  vTaskDelay(((do_xRemote)?750:250) / portTICK_PERIOD_MS);
+  digitalWrite(ledPin, LED_PIN_OFF);
+  // delete myself on completion
+  vTaskDelete(NULL);   
 }
 
 // ***************************************************************
@@ -412,6 +431,12 @@ void taskButtonsLoop(void *parameters)
         // send MIDI message for the same
         midiBuildCommand(theWidget.oscAddress, theWidget.oscPayload_s);
         midiOut.sendSysEx(commandLength, bigMidiCommand, true);
+
+        // flash the LED as local acknowledgement if we are not listening for response
+        if (!do_xRemote) 
+        {
+            xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)theWidget.ledPin, 1, NULL);
+        }
 
         // DEBUG
         printMillis();
@@ -499,7 +524,9 @@ void taskUDPLoop(void *parameters)
                 // for fader-style
                 Serial.print(" FLOAT: ");
                 Serial.print(msg.getFloat(0));
-                // [ ] TODO - visual acknowledgement e.g. flash led briefly
+
+                // visual acknowledgement
+                xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)theWidget.ledPin, 1, NULL);
               }
               else if (msg.isString(0))
               {
@@ -512,7 +539,8 @@ void taskUDPLoop(void *parameters)
                   Serial.print("' INDEX: ");
                   Serial.print(msg.getInt(1));
                 }
-                // [ ] TODO - visual acknowledgement e.g. flash led briefly
+                // visual acknowledgement
+                xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)theWidget.ledPin, 1, NULL);
               };
               Serial.println();
             };
@@ -552,7 +580,7 @@ void taskPokeOSCLoop(void *parameters)
   {
     if (do_xRemote && WiFi.status() == WL_CONNECTED)
     {
-      // if we should be one of the 4 allowed xRemote clients then renew the /xremote request
+      // if we can be one of the 4 allowed xRemote clients then renew the /xremote request
       Serial.print("/xremote\b\b\b\b\b\b\b\b");
       doneLedOff = false;
 
@@ -594,31 +622,6 @@ void taskPokeOSCLoop(void *parameters)
     };
     vTaskDelay(10 / portTICK_PERIOD_MS); // looks like small delay is needed...
   };
-#if false  
-  for (;;)
-  {
-    // poke the X32 to get the current value of the R/W toggles
-    // this method works but causes a lot of traffic
-    // maybe it is better to /xremote....
-    // except that /xremote hogs one of four allowed clients
-    for (auto &theWidget : myWidgets)
-    {
-      if (theWidget.isOscToggle)
-      {
-        OSCMessage msg(theWidget.oscAddress);
-        Udp.beginPacket(X32Address, X32Port);
-        msg.send(Udp);
-        Udp.endPacket();
-        msg.empty();        
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-      }
-      else
-      {
-        // do nothing, but maybe could obtain some other info???
-      }
-    };
-  };
-#endif
 };
 
 // ***************************************************************
@@ -755,7 +758,7 @@ void setup()
   vTaskSuspend(xUDPLoopHandle); // wait until WiFI ok
   xTaskCreate(taskPokeOSCLoop,  "taskPokeOSCLoop",  10000,  NULL, 1, &xPokeOSCLoopHandle);
   vTaskSuspend(xPokeOSCLoopHandle); // wait until WiFI ok
-  xTaskCreate(taskStatusLoop,   "taskStatusLoop",   1000,   NULL, 1, NULL);
+  xTaskCreate(taskStatusLoop,   "taskStatusLoop",   10000,   NULL, 1, NULL);
   WiFi.onEvent(WiFiStationConnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED);
   WiFi.onEvent(WiFiGotIP, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
   WiFi.onEvent(WiFiStationDisconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
