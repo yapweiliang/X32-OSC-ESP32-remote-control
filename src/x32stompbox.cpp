@@ -12,13 +12,20 @@
 // - two-way (receive confirmation and update LED)
 // - monitor battery voltage
 // - [ ] TODO send equivalent MIDI SysEx 
+// Issues:
+// - excess power wasted trying to reconnect to WiFi if unable to 
 // ***************************************************************
-// [ ] hash the WIFI Password
+// [ ] hash the WIFI Password???
 // [ ] hostname to work? esp32-086628 seems to be the default
 // [ ] battery monitor
 // [ ] rewrite without String class (midi message)
-// [ ] visual acknowledgement
 // [ ] compare xRemote and Subscribe
+// [x] test wifi loss
+// [x] prolonged wifi loss generates heat - but wifi.disconnect does not seem to stop the process so still using extra power
+// [ ] 
+// [ ] convert fader f to midi 0-127 sysex
+// ***************************************************************
+// [ ] find other way to save energy usage if cannot connect to WiFi (WiFi.disconnect doesn't seem to stop the process)
 // ***************************************************************
 
 // #include <Arduino.h> // this is already called by Button.h, etc
@@ -298,9 +305,10 @@ void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info)
 
   printMillis();
   Serial.print("WiFi disconnected. Reason: ");
-  Serial.println(info.wifi_sta_disconnected.reason);
+  Serial.print(info.wifi_sta_disconnected.reason);
+  Serial.println(". Suspended taskUDPLoop.");
   printMillis();
-  Serial.println("Suspending taskUDPLoop and trying to reconnect WiFi...");
+  Serial.println("Trying to reconnect WiFi...");
 
   WiFi.begin(ssid, pass);
 }
@@ -334,7 +342,7 @@ const char *wl_status_to_string(wl_status_t status)
 //
 // call with:-
 // xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)22, 1, NULL);
-// xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)theWidget.ledPin, 1, NULL);
+// xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)(uint32_t)theWidget.ledPin, 1, NULL);
 // ***************************************************************
 void taskLedFlash(void *parameters)
 {
@@ -435,7 +443,7 @@ void taskButtonsLoop(void *parameters)
         // flash the LED as local acknowledgement if we are not listening for response
         if (!do_xRemote) 
         {
-            xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)theWidget.ledPin, 1, NULL);
+            xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)(uint32_t)theWidget.ledPin, 1, NULL);
         }
 
         // DEBUG
@@ -526,7 +534,7 @@ void taskUDPLoop(void *parameters)
                 Serial.print(msg.getFloat(0));
 
                 // visual acknowledgement
-                xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)theWidget.ledPin, 1, NULL);
+                xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)(uint32_t)theWidget.ledPin, 1, NULL);
               }
               else if (msg.isString(0))
               {
@@ -540,7 +548,7 @@ void taskUDPLoop(void *parameters)
                   Serial.print(msg.getInt(1));
                 }
                 // visual acknowledgement
-                xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)theWidget.ledPin, 1, NULL);
+                xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)(uint32_t)theWidget.ledPin, 1, NULL);
               };
               Serial.println();
             };
@@ -604,7 +612,7 @@ void taskPokeOSCLoop(void *parameters)
           }
         };
       };
-      vTaskDelay(9000 / portTICK_PERIOD_MS);
+      vTaskDelay(9000 / portTICK_PERIOD_MS); // renew request before 10 seconds
     }
     else
     {
