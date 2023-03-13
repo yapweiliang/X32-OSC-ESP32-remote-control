@@ -20,7 +20,7 @@
 // TODO
 // [ ] hostname to work? esp32-086628 seems to be the default
 // [ ] battery monitor implementation
-// [ ] rewrite without String class (midi message)
+// [x] rewrite without String class (midi message)
 // [x] convert fader f to midi 0-127 sysex
 // [ ] test implementation of MIDI output; does MIDI SysEx method accept float?
 // [ ] does actual X32 echo mute, fader, mutegroup?
@@ -144,11 +144,10 @@ public:
 };
 
 // MIDI OSC Hex converter
-int commandLength = 0;
-byte bigMidiCommand[64];                            // maximum command length in bytes
-byte midiHeader[] = {0xF0, 0x00, 0x20, 0x32, 0x32}; // X32 OSC preamble
-byte midiSpacer[] = {0x20};                         // X32 OSC spacer
-byte midiFooter[] = {0xF7};                         // X32 OSC post-amble
+char bigMidiCommand[64];                            // maximum command length in bytes
+char midiHeader[] = {0xF0, 0x00, 0x20, 0x32, 0x32}; // X32 OSC preamble
+char midiSpacer[] = {0x20};                         // X32 OSC spacer
+char midiFooter[] = {0xF7};                         // X32 OSC post-amble
 
 char *stringOFF = "OFF";
 char *stringON = "ON";
@@ -222,44 +221,21 @@ void printMillis()
 // void midiBuildCommand
 // - construct a MIDI SysEx from the OSC command
 // ***************************************************************
-void midiBuildCommand(String oscCommand, String oscArgument)
+void midiBuildCommand(char* oscCommand, char* oscArgument)
 {
-  // update global variables: commandLength, bigMidiCommand
-  commandLength = 0;
-  for (int j = 0; j < sizeof(midiHeader); j++)
-  {
-    bigMidiCommand[commandLength] = midiHeader[j]; // insert header into bigMidiCommand
-    commandLength++;
-  }
-
-  for (int j = 0; j < oscCommand.length(); j++)
-  {
-    bigMidiCommand[commandLength] = oscCommand[j]; // insert OSC Command into bigMidiCommand
-    commandLength++;
-  }
-
-  for (int j = 0; j < sizeof(midiSpacer); j++)
-  {
-    bigMidiCommand[commandLength] = midiSpacer[j]; // insert a space between OSC command and argument
-    commandLength++;
-  }
-
-  for (int j = 0; j < oscArgument.length(); j++)
-  {
-    bigMidiCommand[commandLength] = oscArgument[j]; // insert OSC Argument into bigMidiCommand
-    commandLength++;
-  }
-
-  for (int j = 0; j < sizeof(midiFooter); j++)
-  {
-    bigMidiCommand[commandLength] = midiFooter[j]; // insert OSC footer into bigMidiCommand
-    commandLength++;
-  }
+  // update global variable: bigMidiCommand
+  // no error checking to ensure that bigMidiCommand does not exceed 64 char
+  bigMidiCommand[0] = 0;
+  strcat(bigMidiCommand,midiHeader);
+  strcat(bigMidiCommand,oscCommand);
+  strcat(bigMidiCommand,midiSpacer);
+  strcat(bigMidiCommand,oscArgument);
+  strcat(bigMidiCommand,midiFooter);
 
   // DEBUG print the HEX string generated
 #ifdef VERBOSE_DEBUG
   Serial.print("MIDI Message in HEX: ");
-  for (int j = 0; j < commandLength; j++) // why 29???
+  for (int j = 0; j < strlen(bigMidiCommand); j++) // why 29???
   {
     if (bigMidiCommand[j] < 0x10)
     {
@@ -443,7 +419,8 @@ void taskButtonsLoop(void *parameters)
 
         // send MIDI message for the same
         midiBuildCommand(theWidget.oscAddress, theWidget.oscPayload_s);
-        midiOut.sendSysEx(commandLength, bigMidiCommand, true);
+        //midiOut.sendSysEx(commandLength, (byte*)bigMidiCommand, true); // char
+        midiOut.sendSysEx(strlen(bigMidiCommand), (byte*)bigMidiCommand, true); // char
 
         // flash the LED as local acknowledgement if we are not listening for response
         if (!do_xRemote) 
