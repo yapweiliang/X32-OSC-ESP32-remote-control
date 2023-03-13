@@ -21,8 +21,10 @@
 // [ ] hostname to work? esp32-086628 seems to be the default
 // [ ] battery monitor implementation
 // [ ] rewrite without String class (midi message)
-// [ ] convert fader f to midi 0-127 sysex
-// [ ] test implementation of MIDI output
+// [x] convert fader f to midi 0-127 sysex
+// [ ] test implementation of MIDI output; does MIDI SysEx method accept float?
+// [ ] does actual X32 echo mute, fader, mutegroup?
+// [ ] reliability of toggles - udp not always sent????
 // ***************************************************************
 // FUTURE
 // [ ] find other way to save energy usage if cannot connect to WiFi (WiFi.disconnect doesn't seem to stop the process)
@@ -368,6 +370,8 @@ void taskLedFlash(void *parameters)
 // ***************************************************************
 void taskButtonsLoop(void *parameters)
 {
+  char stringNumber[4];
+
   for (;;)
   {
     // poll the service button(s)
@@ -401,10 +405,9 @@ void taskButtonsLoop(void *parameters)
           {
             // assume fader-type OSC
             msg.add(theWidget.oscPayload_f);
-            // [ ] TODO convert float to string to compose text for MIDI SysEx; does MIDI SysEx method accept float?
-            // int f = theWidget.oscPayload_f * 127;
-            // what is the least intensive way to convert int to string?
-            theWidget.oscPayload_s = "z_float";
+            // convert float to string to compose text for MIDI SysEx; does MIDI SysEx method accept float?
+            itoa((int)((theWidget.oscPayload_f*127) + 0.5),stringNumber,10);
+            theWidget.oscPayload_s = stringNumber;
           }
           else
           {
@@ -426,7 +429,7 @@ void taskButtonsLoop(void *parameters)
         Udp.endPacket();
         msg.empty();
 
-        // X32 does not seem to echo back the Fader and Mute commands
+        // X32 does not seem to echo back the Fader and Mute commands or Mute Group. Or at least the X32 Emulator...
         if (do_xRemote && (theWidget.isOscToggle || theWidget.oscPayload_f >= 0))
         {
           // send OSC again for toggles (mutes) so we get an update
@@ -435,7 +438,7 @@ void taskButtonsLoop(void *parameters)
           Udp.beginPacket(X32Address, X32Port);
           msg2.send(Udp);
           Udp.endPacket();
-          msg2.empty();
+          msg2.empty();          
         };
 
         // send MIDI message for the same
@@ -597,7 +600,7 @@ void taskPokeOSCLoop(void *parameters)
   {
     if (do_xRemote && WiFi.status() == WL_CONNECTED)
     {
-      // if we can be one of the 4 allowed xRemote clients then renew the /xremote request
+      // if we can be one of the allowed xRemote clients then renew the /xremote request
       Serial.print("/xremote\b\b\b\b\b\b\b\b");
       doneLedOff = false;
 
@@ -609,6 +612,7 @@ void taskPokeOSCLoop(void *parameters)
 
       if (do_Refresh) {
         do_Refresh = false;
+        vTaskDelay(20 / portTICK_PERIOD_MS); // give a short while for xremote to take effect
         for (auto &theWidget : myWidgets)
         {
           if (theWidget.isOscToggle)
@@ -678,14 +682,7 @@ void taskStatusLoop(void *parameters)
 
     // check battery status
     batteryLevel = analogRead(PIN_FOR_BATTERY_VOLTAGE);
-    if (batteryLevel < BATTERY_VOLTAGE_LOW_CUTOFF)
-    {
-      digitalWrite(PIN_FOR_BATTERY_STATUS_LED, LED_PIN_ON);
-    }
-    else
-    {
-      digitalWrite(PIN_FOR_BATTERY_STATUS_LED, LED_PIN_OFF);
-    }
+    digitalWrite(PIN_FOR_BATTERY_STATUS_LED, (batteryLevel < BATTERY_VOLTAGE_LOW_CUTOFF) ? LED_PIN_ON : LED_PIN_OFF);
 
     // delay for flashing LED and for this loop
     vTaskDelay(500 / portTICK_PERIOD_MS); // delay 500 ms
