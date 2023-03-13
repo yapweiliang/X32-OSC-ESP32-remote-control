@@ -2,6 +2,9 @@
 // Behringer X32 stompbox for assigns and mute groups
 // ***************************************************************
 // 2023-03-04 initial draft
+// 2023-03-13 about as much can be done now without actual hardware
+#define VERSION "2023-03-13"
+//
 // Supports:
 // - mutes        /ch/01/mix/on,i     Led state is reversed
 // - mute groups  /config/mute/1,i  
@@ -714,7 +717,8 @@ void setup()
   // send greetings to debug screen
   Serial.println();
   Serial.println("*******************************");
-  Serial.println("*  Wei Liang's X32 Stomp Box  *");
+  Serial.print("Wei Liang's X32 Stomp Box.  Version: ");
+  Serial.println(VERSION);
   Serial.println("*******************************");
 
   // show my contents
