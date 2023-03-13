@@ -3,28 +3,28 @@
 // ***************************************************************
 // 2023-03-04 initial draft
 // Supports:
-// - mutes        /ch/01/mix/on,i
-// - mute groups  /config/mute/1,i
+// - mutes        /ch/01/mix/on,i     Led state is reversed
+// - mute groups  /config/mute/1,i  
 // - faders       /ch/02/mix/09/level,f
 // - snippets     /load,snippet i
 // Features:
 // - one-way (just send) - in case we don't want to hog the bandwidth
 // - two-way (receive confirmation and update LED)
 // - monitor battery voltage
-// - [ ] TODO send equivalent MIDI SysEx 
 // Issues:
-// - excess power wasted trying to reconnect to WiFi if unable to 
+// - excess power wasted trying to reconnect to WiFi if unable to connect (extra 70mA approx)
+// - WiFi password is hardcoded 
+// Thoughts:
+// - subscribe vs xremote?  subscribe gives stream of data even if no changes
 // ***************************************************************
-// [ ] hash the WIFI Password???
+// TODO
 // [ ] hostname to work? esp32-086628 seems to be the default
-// [ ] battery monitor
+// [ ] battery monitor implementation
 // [ ] rewrite without String class (midi message)
-// [ ] compare xRemote and Subscribe
-// [x] test wifi loss
-// [x] prolonged wifi loss generates heat - but wifi.disconnect does not seem to stop the process so still using extra power
-// [ ] 
 // [ ] convert fader f to midi 0-127 sysex
+// [ ] test implementation of MIDI output
 // ***************************************************************
+// FUTURE
 // [ ] find other way to save energy usage if cannot connect to WiFi (WiFi.disconnect doesn't seem to stop the process)
 // ***************************************************************
 
@@ -167,9 +167,9 @@ const unsigned int localPort = 8888; // local port to listen for OSC packets (al
 // ***************************************************************
 OSCWidget myWidgets[] = {
     // friendly_name, button_pin, led_pin, isOscToggle, isReverseLed, oscAddress, oscPayload_s, [oscPayload_i]
-    OSCWidget("Button A", 32, 19, true,  false, "/ch/01/mix/on",        ""),
+    OSCWidget("Button A", 32, 19, true,  true , "/ch/01/mix/on",        ""),
     OSCWidget("Button B", 33, 23, false, false, "/load",                "snippet", 99),
-    OSCWidget("Button C", 25, 18, true,  true,  "/config/mute/1",       ""),
+    OSCWidget("Button C", 25, 18, true,  false,  "/config/mute/1",       ""),
     OSCWidget("Button D", 26,  5, false, false, "/ch/02/mix/09/level",  "", -1 , 0.75)};
 // GPIO INPUTS 34,35,36,39 do not have internal pull-up/pull-down
 #define MIDI_UART 2
@@ -401,7 +401,9 @@ void taskButtonsLoop(void *parameters)
           {
             // assume fader-type OSC
             msg.add(theWidget.oscPayload_f);
-            // [ ] TODO convert float to string to compose text for MIDI SysEx
+            // [ ] TODO convert float to string to compose text for MIDI SysEx; does MIDI SysEx method accept float?
+            // int f = theWidget.oscPayload_f * 127;
+            // what is the least intensive way to convert int to string?
             theWidget.oscPayload_s = "z_float";
           }
           else
@@ -525,7 +527,14 @@ void taskUDPLoop(void *parameters)
               {
                 // for binary states 0 or 1
                 theWidget.oscState = msg.getInt(0);
-                theWidget.doDigitalWrite((theWidget.oscState > 0) ? LED_PIN_OFF : LED_PIN_ON);
+                if (theWidget.isReverseLed)
+                {
+                  theWidget.doDigitalWrite((theWidget.oscState > 0) ? LED_PIN_OFF : LED_PIN_ON);
+                }
+                else
+                {
+                  theWidget.doDigitalWrite((theWidget.oscState > 0) ? LED_PIN_ON : LED_PIN_OFF);
+                }
               }
               else if (msg.isFloat(0))
               {
