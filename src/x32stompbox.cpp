@@ -22,7 +22,6 @@
 // - subscribe vs xremote?  subscribe gives stream of data even if no changes
 // ***************************************************************
 // TODO
-// [ ] hostname to work? esp32-086628 seems to be the default
 // [ ] test battery monitor implementation
 // [ ] test implementation of MIDI output; does MIDI SysEx method accept float?
 // [ ] does actual X32 echo mute, fader, mutegroup?
@@ -114,11 +113,11 @@ public:
         oscPayload_s(theOscPayload_s),// use "" if not used
         oscPayload_f(theOscPayload_f),// use -1 if not used
         oscPayload_i(theOscIndex),    // use -1 if not used
-        oscState(0)
+        oscState(0),
+        wasPressed(false)
   {
     pinMode(buttonPin, INPUT_PULLUP); // initialise the pin for input
     pinMode(ledPin, OUTPUT);          // initialise the pin for LED
-    wasPressed = false;
     button.begin();
   };
 
@@ -777,12 +776,13 @@ void setup()
   Serial.println(ssid);
   Serial.print("Local Port:  ");
   Serial.println(localPort);
+  Serial.print("MAC Address: ");
+  Serial.println(WiFi.macAddress());
   Serial.println("*******************************");
 
   // Connect to WiFi network
+  WiFi.setHostname(MY_HOSTNAME); // need to set hostname before wifi mode
   WiFi.mode(WIFI_MODE_STA);
-  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
-  WiFi.setHostname(MY_HOSTNAME);
   WiFi.begin(ssid, pass);
 
   // start our multitasking loops
