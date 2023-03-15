@@ -3,7 +3,7 @@
 // ***************************************************************
 // 2023-03-04 initial draft
 // 2023-03-13 about as much can be done now without actual hardware
-#define VERSION "2023-03-13"
+#define VERSION "2023-03-15"
 //
 // Supports:
 // - mutes        /ch/01/mix/on,i     Led state is reversed
@@ -14,6 +14,7 @@
 // - one-way (just send) - in case we don't want to hog the bandwidth
 // - two-way (receive confirmation and update LED)
 // - monitor battery voltage
+// - long press button (to prevent accidental presses, e.g. if scene change)
 // Issues:
 // - excess power wasted trying to reconnect to WiFi if unable to connect (extra 70mA approx)
 // - WiFi password is hardcoded 
@@ -22,15 +23,14 @@
 // ***************************************************************
 // TODO
 // [ ] hostname to work? esp32-086628 seems to be the default
-// [ ] battery monitor implementation
-// [x] rewrite without String class (midi message)
-// [x] convert fader f to midi 0-127 sysex
+// [ ] test battery monitor implementation
 // [ ] test implementation of MIDI output; does MIDI SysEx method accept float?
 // [ ] does actual X32 echo mute, fader, mutegroup?
 // [ ] reliability of toggles - udp not always sent????
 // ***************************************************************
 // FUTURE
 // [ ] find other way to save energy usage if cannot connect to WiFi (WiFi.disconnect doesn't seem to stop the process)
+// [ ] have a MIDI-only payload
 // ***************************************************************
 
 // #include <Arduino.h> // this is already called by Button.h, etc
@@ -81,6 +81,9 @@ public:
   uint8_t buttonPin;       // corresponding GPIO pin
   uint8_t ledPin;          // corresponding GPIO pin
   Button button;
+  int actionTrigger;       // action_PRESS or action_LONG_PRESS
+  unsigned long pressedMillis; // when was the button pressed?
+  bool wasPressed;
 
   bool isOscToggle;   // is this a toggle (like Mute) or snippet
   bool isReverseLed;  // LED state opposite to boolean state
@@ -93,8 +96,9 @@ public:
   OSCWidget(char *theFriendlyName,
             int theButtonPin,
             int theLedPin,
-            int theActionType,
-            int theLedResponse,
+            int theTrigger,
+            bool theOscType, 
+            bool theLedResponse,
             char *theOscAddress,
             char *theOscPayload_s,
             int theOscIndex = -1,
@@ -103,7 +107,8 @@ public:
         friendlyDebugName(theFriendlyName),
         buttonPin(theButtonPin),
         ledPin(theLedPin),
-        isOscToggle(theActionType),
+        actionTrigger(theTrigger),
+        isOscToggle(theOscType),
         isReverseLed(theLedResponse),
         oscAddress(theOscAddress),
         oscPayload_s(theOscPayload_s),// use "" if not used
@@ -113,6 +118,7 @@ public:
   {
     pinMode(buttonPin, INPUT_PULLUP); // initialise the pin for input
     pinMode(ledPin, OUTPUT);          // initialise the pin for LED
+    wasPressed = false;
     button.begin();
   };
 
@@ -129,6 +135,8 @@ public:
     Serial.print(",\t");
     Serial.print(ledPin);
     Serial.print(",\t");
+    Serial.print(actionTrigger);
+    Serial.print(",\t");    
     Serial.print(isOscToggle);
     Serial.print(",\t");
     Serial.print(isReverseLed);
@@ -155,6 +163,11 @@ char midiFooter[] = {0xF7};                         // X32 OSC post-amble
 char *stringOFF = "OFF";
 char *stringON = "ON";
 
+#define action_NOTHING -1
+#define action_PRESS 1
+#define action_LONG_PRESS 2
+#define LONG_PRESS_DURATION 3000  // 3 seconds
+
 // ***************************************************************
 // site settings, network configuration, etc
 // ***************************************************************
@@ -171,10 +184,10 @@ const unsigned int localPort = 8888; // local port to listen for OSC packets (al
 // ***************************************************************
 OSCWidget myWidgets[] = {
     // friendly_name, button_pin, led_pin, isOscToggle, isReverseLed, oscAddress, oscPayload_s, [oscPayload_i]
-    OSCWidget("Button A", 32, 19, true,  true , "/ch/01/mix/on",        ""),
-    OSCWidget("Button B", 33, 23, false, false, "/load",                "snippet", 99),
-    OSCWidget("Button C", 25, 18, true,  false,  "/config/mute/1",       ""),
-    OSCWidget("Button D", 26,  5, false, false, "/ch/02/mix/09/level",  "", -1 , 0.75)};
+    OSCWidget("Button A", 32, 19, action_PRESS,       true,  true , "/ch/01/mix/on",        ""),
+    OSCWidget("Button B", 33, 23, action_LONG_PRESS,  false, false, "/load",                "snippet", 99),
+    OSCWidget("Button C", 25, 18, action_PRESS,       true,  false, "/config/mute/1",       ""),
+    OSCWidget("Button D", 26,  5, action_PRESS,       false, false, "/ch/02/mix/09/level",  "", -1 , 0.75)};
 // GPIO INPUTS 34,35,36,39 do not have internal pull-up/pull-down
 #define MIDI_UART 2
 #define PIN_FOR_BATTERY_STATUS_LED 4
@@ -350,6 +363,7 @@ void taskLedFlash(void *parameters)
 void taskButtonsLoop(void *parameters)
 {
   char stringNumber[4];
+  int action = action_NOTHING;
 
   for (;;)
   {
@@ -368,7 +382,32 @@ void taskButtonsLoop(void *parameters)
     // poll the OSC button(s)
     for (auto &theWidget : myWidgets)
     {
+      // how was the button pressed?
       if (theWidget.button.pressed())
+      {
+        theWidget.pressedMillis = millis();
+        theWidget.wasPressed = true;
+        action = action_PRESS;
+      }
+      else if (theWidget.wasPressed && ((millis() - theWidget.pressedMillis) > LONG_PRESS_DURATION)) 
+      {
+        theWidget.wasPressed = false;
+        action = action_LONG_PRESS;
+      }
+      else
+      {
+        action = action_NOTHING;
+      }
+      
+#ifdef VERBOSE_DEBUG      
+      if (action != action_NOTHING) {
+        printMillis();
+        Serial.print("button press action: ");
+        Serial.println(action);
+      }
+#endif
+
+      if (action == theWidget.actionTrigger && action != action_NOTHING)
       {
         // compose the OSC message
         OSCMessage msg(theWidget.oscAddress);
@@ -435,9 +474,9 @@ void taskButtonsLoop(void *parameters)
         printMillis();
         theWidget.print();
       };
-    };
+    }; // end for
     // no need to add delay here, we want to poll buttons quickly
-  };
+  }; // end for ever loop
 };
 
 // ***************************************************************
