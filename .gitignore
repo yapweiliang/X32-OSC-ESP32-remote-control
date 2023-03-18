@@ -7,3 +7,4 @@ secrets.h
 lib/README
 include/README
 test/README
+*.xlsx
