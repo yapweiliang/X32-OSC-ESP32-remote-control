@@ -3,7 +3,7 @@
 // ***************************************************************
 // 2023-03-04 initial draft
 // 2023-03-13 about as much can be done now without actual hardware
-#define VERSION "2023-03-15"
+#define VERSION "2023-03-18"
 //
 // Supports:
 // - mutes        /ch/01/mix/on,i     Led state is reversed
@@ -13,16 +13,16 @@
 // Features:
 // - one-way (just send) - in case we don't want to hog the bandwidth
 // - two-way (receive confirmation and update LED)
-// - monitor battery voltage
+// - monitor battery voltage, and flash GPIO LED if low
 // - long press button (to prevent accidental presses, e.g. if scene change)
 // Issues:
 // - excess power wasted trying to reconnect to WiFi if unable to connect (extra 70mA approx)
+// - battery voltage divider may drain battery
 // - WiFi password is hardcoded 
 // Thoughts:
 // - subscribe vs xremote?  subscribe gives stream of data even if no changes
 // ***************************************************************
 // TODO
-// [ ] test battery monitor implementation
 // [ ] test implementation of MIDI output; does MIDI SysEx method accept float?
 // [ ] does actual X32 echo mute, fader, mutegroup?
 // [ ] reliability of toggles - udp not always sent????
@@ -191,9 +191,17 @@ OSCWidget myWidgets[] = {
 #define MIDI_UART 2
 #define PIN_FOR_BATTERY_STATUS_LED 4
 #define PIN_FOR_WIFI_STATUS_LED 22      // internal LED is 22 for my LOLIN32
-#define PIN_FOR_BATTERY_VOLTAGE 36      // cannot use ADC2 pins (needed for WiFi)
-#define BATTERY_VOLTAGE_LOW_CUTOFF 3000 // 0 - 4095; value depends on voltage divider circuit
 #define PIN_FOR_MODE_SWITCH 14
+
+#define PIN_FOR_BATTERY_VOLTAGE 36      // cannot use ADC2 pins (needed for WiFi)
+#define BATTERY_LOW_CUTOFF 3093 
+// BATTERY THRESHOLDS 0 (0V) - 4095 (3.3V); value depends on voltage divider circuit
+// however apparently 3.2V gives 4095 therefore adjusted table below
+// ---------------- ----- === 0.50 ====   === 0.67 ====   === 0.75 ====
+// battery depleted 3.10V (1.55V, 1984)   (2.08V, 2658)   (2.33V, 2975)
+// battery low 20%  3.31V (1.66V, 2119)   (2.22V, 2840)   (2.48V, 3179)
+// battery full     4.16V (2.08V, 2662)   (2.79V, 3567)   (3.12V, 3993)
+// battery charging 4.26V (2.13V, 2726)   (2.85V, 3652)   (3.20V, 4089)
 
 #if true
 // LED lights up if pin pulls voltage down
@@ -250,7 +258,7 @@ void midiBuildCommand(char* oscCommand, char* oscArgument)
   // DEBUG print the HEX string generated
 #ifdef VERBOSE_DEBUG
   Serial.print("MIDI Message in HEX: ");
-  for (int j = 0; j < strlen(bigMidiCommand); j++) // why 29???
+  for (int j = 0; j < strlen(bigMidiCommand); j++)
   {
     if (bigMidiCommand[j] < 0x10)
     {
@@ -669,17 +677,19 @@ void taskPokeOSCLoop(void *parameters)
 // ***************************************************************
 void taskStatusLoop(void *parameters)
 {
-  int statusLed = LED_PIN_ON;
+  int batteryLevel;
+  int batteryStatusLed = LED_PIN_ON;
+  int wifiStatusLed = LED_PIN_ON;
   int lastWifiStatus = 99; // start with an undefined number
   wl_status_t wifiStatus;
-  float batteryLevel;
+  
   for (;;)
   {
     // check WiFi status and adjust led indicator
     wifiStatus = WiFi.status();
     if (wifiStatus == WL_CONNECTED)
     {
-      statusLed = LED_PIN_ON;
+      wifiStatusLed = LED_PIN_ON;
       if (wifiStatus != lastWifiStatus)
       {
         lastWifiStatus = wifiStatus;
@@ -687,7 +697,7 @@ void taskStatusLoop(void *parameters)
     }
     else
     {
-      statusLed = (statusLed == LED_PIN_ON) ? LED_PIN_OFF : LED_PIN_ON; // flip the state of the LED
+      wifiStatusLed = (wifiStatusLed == LED_PIN_ON) ? LED_PIN_OFF : LED_PIN_ON; // flip the state of the LED
       if (wifiStatus != lastWifiStatus)
       {
         lastWifiStatus = wifiStatus;
@@ -696,12 +706,24 @@ void taskStatusLoop(void *parameters)
         Serial.println(wl_status_to_string(wifiStatus));
       }
     };
-    digitalWrite(PIN_FOR_WIFI_STATUS_LED, statusLed);
+    digitalWrite(PIN_FOR_WIFI_STATUS_LED, wifiStatusLed);
 
     // check battery status
     batteryLevel = analogRead(PIN_FOR_BATTERY_VOLTAGE);
-    digitalWrite(PIN_FOR_BATTERY_STATUS_LED, (batteryLevel < BATTERY_VOLTAGE_LOW_CUTOFF) ? LED_PIN_ON : LED_PIN_OFF);
-
+    if (batteryLevel < BATTERY_LOW_CUTOFF)
+    {
+      batteryStatusLed = (batteryStatusLed == LED_PIN_ON) ? LED_PIN_OFF : LED_PIN_ON; // flip the state of the LED
+    }
+    else
+    {
+      batteryStatusLed = LED_PIN_OFF;
+    }
+    digitalWrite(PIN_FOR_BATTERY_STATUS_LED, batteryStatusLed);
+#ifdef VERBOSE_DEBUG    
+    Serial.print("Batt:");
+    Serial.print(batteryLevel);
+    Serial.print("   \b\b\b\b\b\b\b\b\b\b\b\b");
+#endif
     // delay for flashing LED and for this loop
     vTaskDelay(500 / portTICK_PERIOD_MS); // delay 500 ms
   }
