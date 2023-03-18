@@ -19,6 +19,8 @@
 // - excess power wasted trying to reconnect to WiFi if unable to connect (extra 70mA approx)
 // - battery voltage divider may drain battery
 // - WiFi password is hardcoded 
+// Limitations
+// - unable to have double-assign buttons (same button to two oscWidgets)
 // Thoughts:
 // - subscribe vs xremote?  subscribe gives stream of data even if no changes
 // ***************************************************************
@@ -182,18 +184,33 @@ const unsigned int localPort = 8888; // local port to listen for OSC packets (al
 // payload and button configuration, including pin configuration
 // ***************************************************************
 OSCWidget myWidgets[] = {
-    // friendly_name, button_pin, led_pin, isOscToggle, isReverseLed, oscAddress, oscPayload_s, [oscPayload_i]
-    OSCWidget("Button A", 32, 19, action_PRESS,       true,  true , "/ch/01/mix/on",        ""),
-    OSCWidget("Button B", 33, 23, action_LONG_PRESS,  false, false, "/load",                "snippet", 99),
-    OSCWidget("Button C", 25, 18, action_PRESS,       true,  false, "/config/mute/1",       ""),
-    OSCWidget("Button D", 26,  5, action_PRESS,       false, false, "/ch/02/mix/09/level",  "", -1 , 0.75)};
-// GPIO INPUTS 34,35,36,39 do not have internal pull-up/pull-down
-#define MIDI_UART 2
-#define PIN_FOR_BATTERY_STATUS_LED 4
-#define PIN_FOR_WIFI_STATUS_LED 22      // internal LED is 22 for my LOLIN32
-#define PIN_FOR_MODE_SWITCH 14
+    //         friendly_name      action_trigger                    oscAddress
+    //                    button_pin                  isOscToggle                           payload_s
+    //                        led_pin                        isReverseLed                         [payload_i], [payload_f]
+    OSCWidget("Button A", 12, 13, action_LONG_PRESS,  false, false, "/load",                "snippet", 99),
+    OSCWidget("Button B", 14, 15, action_LONG_PRESS,  false, false, "/load",                "snippet", 99),
+    OSCWidget("Button C", 27,  2, action_PRESS,       false, false, "/load",                "snippet", 11),   // 11 = band sing
+    OSCWidget("Button D", 26,  0, action_PRESS,       false, false, "/load",                "snippet", 12),   // 12 = band speak
+    OSCWidget("Button E", 25,  4, action_PRESS,       false, false, "/load",                "snippet", 15),   // 15 = band speak louder
+    OSCWidget("Button F", 33,  5, action_PRESS,       false, false, "/load",                "snippet", 13),   // 13 = lectern on and reset band
+    OSCWidget("Button G", 32, 18, action_PRESS,       true,  false, "/config/mute/6",       ""),              // Mute Group 6 = all band
+    OSCWidget("Button H", 35, 23, action_PRESS,       true,  true , "/dca/5/on",            "")};             // DCA 5 = speech
 
-#define PIN_FOR_BATTERY_VOLTAGE 36      // cannot use ADC2 pins (needed for WiFi)
+//    OSCWidget("Example", 35, 23, action_PRESS,       true,  true , "/ch/01/mix/on",        ""),
+//    OSCWidget("Example", 35, 23, action_NOTHING,     true,  true , "/dca/5/on",            ""),
+//    OSCWidget("Example", 35, 23, action_NOTHING,     true,  false, "/config/mute/1",       ""),
+//    OSCWidget("Example", 35, 23, action_LONG_PRESS,  false, false, "/load",                "snippet", 99),
+//    OSCWidget("Example", 35, 23, action_NOTHING,     false, false, "/ch/02/mix/09/level",  "", -1 , 0.75),
+
+// LOLIN32 Lite
+// GPIO INPUTS 34,35,36,39 do not have internal pull-up/pull-down therefore do not define in myWidgets unless actually needed
+// GPIO 2 is pulled down at start so LED will initially look dimly lit
+#define MIDI_UART 2                     // GPIO 16,17
+#define UNUSED_GPIO 39                  // unused GPIO pin
+#define PIN_FOR_WIFI_STATUS_LED 22      // internal LED is 22 for my LOLIN32
+#define PIN_FOR_MODE_SWITCH 36          // needs pull-up 
+#define PIN_FOR_BATTERY_VOLTAGE 34      // cannot use ADC2 pins (needed for WiFi)
+#define PIN_FOR_BATTERY_STATUS_LED 19
 #define BATTERY_LOW_CUTOFF 3093 
 // BATTERY THRESHOLDS 0 (0V) - 4095 (3.3V); value depends on voltage divider circuit
 // however apparently 3.2V gives 4095 therefore adjusted table below
