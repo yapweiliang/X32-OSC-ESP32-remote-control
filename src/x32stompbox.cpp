@@ -15,12 +15,13 @@
 // - two-way (receive confirmation and update LED)
 // - monitor battery voltage, and flash GPIO LED if low
 // - long press button (to prevent accidental presses, e.g. if scene change)
+// - more than one widget can monitor the same GPIO button (e.g. short press and long press; short press event will be generated even if long press)
 // Issues:
 // - excess power wasted trying to reconnect to WiFi if unable to connect (extra 70mA approx)
 // - battery voltage divider may drain battery
 // - WiFi password is hardcoded 
 // Limitations
-// - unable to have double-assign buttons (same button to two oscWidgets)
+// - short press button event will be generated even if long press
 // Thoughts:
 // - subscribe vs xremote?  subscribe gives stream of data even if no changes
 // ***************************************************************
@@ -407,11 +408,17 @@ void taskButtonsLoop(void *parameters)
     for (auto &theWidget : myWidgets)
     {
       // how was the button pressed?
-      if (theWidget.button.pressed())
+      if (theWidget.button.toggled())
       {
-        theWidget.pressedMillis = millis();
-        theWidget.wasPressed = true;
-        action = action_PRESS;
+        if (theWidget.button.read() == Button::PRESSED) {
+          theWidget.pressedMillis = millis();
+          theWidget.wasPressed = true;
+          action = action_PRESS;
+        } else
+        {
+          theWidget.wasPressed = false;
+          action = action_NOTHING;
+        }
       }
       else if (theWidget.wasPressed && ((millis() - theWidget.pressedMillis) > LONG_PRESS_DURATION)) 
       {
@@ -422,7 +429,7 @@ void taskButtonsLoop(void *parameters)
       {
         action = action_NOTHING;
       }
-      
+
 #ifdef VERBOSE_DEBUG      
       if (action != action_NOTHING) {
         printMillis();
