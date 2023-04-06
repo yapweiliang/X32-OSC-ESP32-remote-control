@@ -3,7 +3,7 @@
 // ***************************************************************
 // 2023-03-04 initial draft
 // 2023-03-13 about as much can be done now without actual hardware
-#define VERSION "2023-03-18"
+#define VERSION "2023-04-06"
 //
 // Supports:
 // - mutes        /ch/01/mix/on,i     Led state is reversed
@@ -29,6 +29,7 @@
 // [ ] test implementation of MIDI output; does MIDI SysEx method accept float?
 // [ ] does actual X32 echo mute, fader, mutegroup?
 // [ ] reliability of toggles - udp not always sent????
+// [ ] does actual X32 echo /load snippet ; and how can we match that return?
 // ***************************************************************
 // FUTURE
 // [ ] find other way to save energy usage if cannot connect to WiFi (WiFi.disconnect doesn't seem to stop the process)
@@ -376,7 +377,7 @@ void taskLedFlash(void *parameters)
   Serial.println(ledPin);
 #endif
   digitalWrite(ledPin, LED_PIN_ON);
-  vTaskDelay(((do_xRemote)?750:250) / portTICK_PERIOD_MS);
+  vTaskDelay(((do_xRemote)?200:100) / portTICK_PERIOD_MS);
   digitalWrite(ledPin, LED_PIN_OFF);
   // delete myself on completion
   vTaskDelete(NULL);   
