@@ -3,7 +3,7 @@
 // ***************************************************************
 // 2023-03-04 initial draft
 // 2023-03-13 about as much can be done now without actual hardware
-#define VERSION "2023-04-06"
+#define VERSION "2023-04-06 - 2"
 //
 // Supports:
 // - mutes        /ch/01/mix/on,i     Led state is reversed
@@ -22,6 +22,8 @@
 // - WiFi password is hardcoded 
 // Limitations
 // - short press button event will be generated even if long press
+// - X32 echos /load snippet but does not say which snippet
+// - battery power switch disconnects battery (i.e. cannot charge if 'off')
 // Thoughts:
 // - subscribe vs xremote?  subscribe gives stream of data even if no changes
 // ***************************************************************
@@ -29,7 +31,7 @@
 // [ ] test implementation of MIDI output; does MIDI SysEx method accept float?
 // [ ] does actual X32 echo mute, fader, mutegroup?
 // [ ] reliability of toggles - udp not always sent????
-// [ ] does actual X32 echo /load snippet ; and how can we match that return?
+// [ ] indicate battery level at start-up
 // ***************************************************************
 // FUTURE
 // [ ] find other way to save energy usage if cannot connect to WiFi (WiFi.disconnect doesn't seem to stop the process)
@@ -576,6 +578,7 @@ void taskUDPLoop(void *parameters)
             {
               // yes we do, so let's take some action
               matched++;
+              Serial.println();
               Serial.print("MATCHES ");
               Serial.print(theWidget.friendlyDebugName);
 
@@ -614,6 +617,12 @@ void taskUDPLoop(void *parameters)
                 }
                 // visual acknowledgement
                 xTaskCreate(taskLedFlash, "taskLedFlash", 10000, (void*)(uint32_t)theWidget.ledPin, 1, NULL);
+
+                // in this section the likely use case is /load, snippet
+                // X32 seems to return /load~~~,si~snippet~~~~N
+                // where N == 1 if valid, N == 0 if no such snippet
+                // so it is not possible to determine which snippet was loaded
+              
               };
               Serial.println();
             };
