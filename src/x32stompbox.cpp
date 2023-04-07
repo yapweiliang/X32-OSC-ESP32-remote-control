@@ -22,7 +22,7 @@
 // - WiFi password is hardcoded 
 // Limitations
 // - short press button event will be generated even if long press
-// - X32 echos /load snippet but does not say which snippet
+// - X32 echoes /load snippet but does not say which snippet
 // - battery power switch disconnects battery (i.e. cannot charge if 'off')
 // Thoughts:
 // - subscribe vs xremote?  subscribe gives stream of data even if no changes
@@ -30,7 +30,6 @@
 // TODO
 // [ ] test implementation of MIDI output; does MIDI SysEx method accept float?
 // [ ] does actual X32 echo mute, fader, mutegroup?
-// [ ] reliability of toggles - udp not always sent????
 // [ ] indicate battery level at start-up
 // ***************************************************************
 // FUTURE
