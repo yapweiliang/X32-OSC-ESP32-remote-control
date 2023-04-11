@@ -3,7 +3,7 @@
 // ***************************************************************
 // 2023-03-04 initial draft
 // 2023-03-13 about as much can be done now without actual hardware
-#define VERSION "2023-04-06 - 2"
+#define VERSION "2023-04-06 - 3"
 //
 // Supports:
 // - mutes        /ch/01/mix/on,i     Led state is reversed
@@ -16,6 +16,7 @@
 // - monitor battery voltage, and flash GPIO LED if low
 // - long press button (to prevent accidental presses, e.g. if scene change)
 // - more than one widget can monitor the same GPIO button (e.g. short press and long press; short press event will be generated even if long press)
+// - indicate when battery nearly full
 // Issues:
 // - excess power wasted trying to reconnect to WiFi if unable to connect (extra 70mA approx)
 // - battery voltage divider may drain battery
@@ -24,6 +25,7 @@
 // - short press button event will be generated even if long press
 // - X32 echoes /load snippet but does not say which snippet
 // - battery power switch disconnects battery (i.e. cannot charge if 'off')
+// - battery-full indication turns off when my ESP32-Lolin stops charging the LiPo
 // Thoughts:
 // - subscribe vs xremote?  subscribe gives stream of data even if no changes
 // ***************************************************************
@@ -210,13 +212,19 @@ OSCWidget myWidgets[] = {
 // LOLIN32 Lite
 // GPIO INPUTS 34,35,36,39 do not have internal pull-up/pull-down therefore do not define in myWidgets unless actually needed
 // GPIO 2 is pulled down at start so LED will initially look dimly lit
-#define MIDI_UART 2                     // GPIO 16,17
+#define MIDI_UART 2 // GPIO 16,17
 // UNUSED_GPIO 39                       // unused GPIO pin
-#define PIN_FOR_WIFI_STATUS_LED 22      // internal LED is 22 for my LOLIN32
-#define PIN_FOR_MODE_SWITCH 36          // needs pull-up 
-#define PIN_FOR_BATTERY_VOLTAGE 34      // cannot use ADC2 pins (needed for WiFi)
-#define PIN_FOR_BATTERY_STATUS_LED 19
-#define BATTERY_LOW_CUTOFF 3034         // 3034 is 20% between 3.10V and 4.16V using divider 68k/(68k+27k)
+#define PIN_FOR_WIFI_STATUS_LED 22         // internal LED is 22 for my LOLIN32
+#define PIN_FOR_MODE_SWITCH 36             // needs pull-up
+#define PIN_FOR_BATTERY_VOLTAGE 34         // cannot use ADC2 pins (needed for WiFi)
+#define PIN_FOR_BATTERY_STATUS_LED 19      //
+#define BATTERY_LOW_CUTOFF 3034            // 3034 is 20% between 3.10V and 4.16V using divider 68k/(68k+27k)
+#define BATTERY_FULL_CUTOFF 3762           // 3713 = 90%, 3762 = 95%, 3801 = 99%; it only periodically hits 95%
+#define BATTERY_MIN 2840                   // 2840 corresponds to 3.10V in calculations using the above divider
+#define BATTERY_RANGE (3811 - BATTERY_MIN) // 3811 corresponds to 4.16V
+#define ADC_VMAX 3.2                       // apparently 3.2V gives 4095
+#define ADC_DIVIDER 0.715789474            // (68 / (68+27))
+
 // BATTERY THRESHOLDS 0 (0V) - 4095 (3.3V); value depends on voltage divider circuit
 // however apparently 3.2V gives 4095 therefore adjusted table below
 // ---------------- ----- === 0.50 ====   === 0.67 ====   === 0.75 ====
@@ -749,6 +757,10 @@ void taskStatusLoop(void *parameters)
     {
       batteryStatusLed = (batteryStatusLed == LED_PIN_ON) ? LED_PIN_OFF : LED_PIN_ON; // flip the state of the LED
     }
+    else if (batteryLevel > BATTERY_FULL_CUTOFF)
+    {
+      batteryStatusLed = LED_PIN_ON;
+    }
     else
     {
       batteryStatusLed = LED_PIN_OFF;
@@ -835,6 +847,15 @@ void setup()
   Serial.println(localPort);
   Serial.print("MAC Address: ");
   Serial.println(WiFi.macAddress());
+  Serial.println("*******************************");
+
+  float batteryLevel; // random values when battery is disconnected
+  batteryLevel = analogRead(PIN_FOR_BATTERY_VOLTAGE);
+  Serial.print("Battery: ");
+  Serial.print(static_cast<int>((batteryLevel-BATTERY_MIN)/BATTERY_RANGE * 100));
+  Serial.print("% (");
+  Serial.print((batteryLevel / 4095) * ADC_VMAX / ADC_DIVIDER);
+  Serial.println("V), assuming battery is connected");
   Serial.println("*******************************");
 
   // Connect to WiFi network
