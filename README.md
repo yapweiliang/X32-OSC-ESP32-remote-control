@@ -37,6 +37,12 @@ snippets    | ``/load,snippet i`` |
 
 - subscribe vs xremote?  subscribe gives stream of data even if no changes
 
+## Project milestones:
+
+* `2023-03-04` initial draft
+* `2023-03-13` about as much can be done now without actual hardware
+* `2023-04-06` first site release
+
 ## TODO:
 
 - [ ] test implementation of MIDI output; does MIDI SysEx method accept float?
