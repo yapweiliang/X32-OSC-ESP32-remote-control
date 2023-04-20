@@ -54,5 +54,12 @@ snippets    | ``/load,snippet i`` |
 - [ ] find other way to save energy usage if cannot connect to WiFi (WiFi.disconnect doesn't seem to stop the process)
 - [ ] have a MIDI-only payload
 
----
+## Thanks and Inspirations
 
+- https://community.musictribe.com/discussion/solutions/10/0/257791/diy-wifi%252Fmidi-remote-control-box-for-x-air%253A-working!
+- [Patrick-Gilles Maillot](https://sites.google.com/site/patrickmaillot/x32)
+    - X32 emulator
+    - Unofficial X32 OSC protocol document
+    - and other utilities
+
+---
