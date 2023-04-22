@@ -16,7 +16,8 @@ snippets    | ``/load,snippet i`` |
 - one-way (just send) - in case we don't want to hog the bandwidth
 - two-way (receive confirmation and update LED)
 - monitor battery voltage, and flash GPIO LED if low
-- long press button (to prevent accidental presses, e.g. for scenes/snippets)
+- long press button (for secondary function, e.g. variation of button)
+- very long press button (to prevent accidental presses, e.g. major snippets)
 - more than one widget can monitor the same GPIO button (e.g. short press and long press; short press event will be generated even if long press)
 - indicate when battery nearly full
 

@@ -2,7 +2,7 @@
 // Behringer X32 stompbox for assigns and mute groups
 // ***************************************************************
 // see README.md for more information
-#define VERSION "2023-04-06 - 3"
+#define VERSION "2023-04-22"
 // ***************************************************************
 
 // #include <Arduino.h> // this is already called by Button.h, etc
@@ -135,10 +135,13 @@ char midiFooter[] = {0xF7};                         // X32 OSC post-amble
 char *stringOFF = "OFF";
 char *stringON = "ON";
 
-#define action_NOTHING -1
-#define action_PRESS 1
-#define action_LONG_PRESS 2
-#define LONG_PRESS_DURATION 3000  // 3 seconds
+#define action_NOTHING 0x00
+#define action_PRESS 0x01
+#define action_LONG_PRESS 0x02
+#define action_VLONG_PRESS 0x04
+#define mask_LONG_PRESS 0x06 // binary 0110
+#define LONG_PRESS_DURATION 1000  // 1 second
+#define VERY_LONG_PRESS_DURATION 3000 // 3 seconds
 
 // ***************************************************************
 // site settings, network configuration, etc
@@ -158,10 +161,11 @@ OSCWidget myWidgets[] = {
     //         friendly_name      action_trigger                    oscAddress
     //                    button_pin                  isOscToggle                           payload_s
     //                        led_pin                        isReverseLed                         [payload_i], [payload_f]
-    OSCWidget("Bttn A__", 12, 13, action_LONG_PRESS,  false, false, "/load",                "snippet", 99),   // reset speech
-    OSCWidget("Button A", 12, 13, action_PRESS,       false, false, "/load",                "snippet", 13),   // 13 = lectern on and reset band
-    OSCWidget("Button B", 14, 15, action_PRESS,       false, false, "/load",                "snippet", 15),   // 15 = band speak louder
+    OSCWidget("Bttn A__", 12, 13, action_VLONG_PRESS, false, false, "/load",                "snippet", 10),   // 10 = init snippet
+    OSCWidget("Button A", 12, 13, action_PRESS,       false, false, "/load",                "snippet", 13),   // 13 = lectern on
+    OSCWidget("Button B", 14, 15, action_PRESS,       false, false, "/load",                "snippet", 16),   // 16 = lectern louder
     OSCWidget("Button C", 27,  2, action_PRESS,       false, false, "/load",                "snippet", 12),   // 12 = band speak
+    OSCWidget("Bttn C__", 27,  2, action_LONG_PRESS,  false, false, "/load",                "snippet", 15),   // 15 = band speak louder
     OSCWidget("Button D", 26,  0, action_PRESS,       false, false, "/load",                "snippet", 11),   // 11 = band sing
     OSCWidget("Button E", 25,  4, action_PRESS,       true,  true , "/dca/5/on",            ""),              // DCA 5 = speech
     OSCWidget("Button F", 33,  5, action_PRESS,       true,  false, "/config/mute/6",       "")};             // Mute Group 6 = all band
@@ -367,6 +371,7 @@ void taskButtonsLoop(void *parameters)
 {
   char stringNumber[4];
   int action = action_NOTHING;
+  int how_long_is_long;
 
   for (;;)
   {
@@ -386,6 +391,7 @@ void taskButtonsLoop(void *parameters)
     for (auto &theWidget : myWidgets)
     {
       // how was the button pressed?
+      how_long_is_long = (theWidget.actionTrigger == action_LONG_PRESS) ? LONG_PRESS_DURATION : VERY_LONG_PRESS_DURATION;
       if (theWidget.button.toggled())
       {
         if (theWidget.button.read() == Button::PRESSED) {
@@ -398,10 +404,10 @@ void taskButtonsLoop(void *parameters)
           action = action_NOTHING;
         }
       }
-      else if (theWidget.wasPressed && ((millis() - theWidget.pressedMillis) > LONG_PRESS_DURATION)) 
+      else if (theWidget.wasPressed && ((millis() - theWidget.pressedMillis) > how_long_is_long)) 
       {
         theWidget.wasPressed = false;
-        action = action_LONG_PRESS;
+        action = theWidget.actionTrigger & mask_LONG_PRESS; // either action_LONG_PRESS or action_VLONG_PRESS
       }
       else
       {
